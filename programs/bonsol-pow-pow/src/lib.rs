@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
-    token_2022::spl_token_2022::state::Mint as MintImpl,
     token_interface::{
         Mint, TokenAccount, TokenInterface
     }
@@ -10,12 +9,14 @@ use anchor_spl::token_2022::spl_token_2022::{
 };
 use anchor_lang::solana_program::sysvar::Sysvar;
 use anagram_bonsol_channel_interface::{
-    macros:: {execute, callback},
-    anchor::{
-        BonsolChannel,
-        DeploymentAccountV1, 
-        ExecutionRequestV1,
-    },
+    anchor::DeployV1Account,
+    anchor::ExecutionRequestV1Account,
+    execute,
+    // anchor::{
+    //     BonsolChannel,
+    //     DeploymentAccountV1, 
+    //     ExecutionRequestV1,
+    // },
 };
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
@@ -51,8 +52,10 @@ pub struct Initialize<'info> {
         init,
         payer = payer,
         signer,
+        seeds = [b"mint"],
+        bump,
         mint::token_program = token_program,
-        mint::decimals = 0,
+        mint::decimals = 9,
         mint::authority = pow_config,
         mint::freeze_authority = pow_config,
         extensions::metadata_pointer::authority = authority,
@@ -84,7 +87,7 @@ pub struct MineToken<'info> {
     #[account(
 
     )]
-    pub deployment_account:  InterfaceAccount<'info, DeploymentAccountV1>,
+    pub deployment_account:  InterfaceAccount<'info, DeployV1Account<'info>>,
 }
 
 
