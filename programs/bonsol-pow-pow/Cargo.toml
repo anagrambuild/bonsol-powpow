@@ -14,12 +14,12 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build", "anagram-bonsol-channel-interface/idl-build"]
 
 [profile.release]
 overflow-checks = true
 
 [dependencies]
-anchor-lang = "0.30.1"
+anchor-lang = {version = "0.30", features = ["init-if-needed"]}
 anchor-spl = "0.30.1"
-anagram-bonsol-channel-interface = { path = "../../../bonsol/onchain/channel-interface" , features = ["macros","anchor"], default-features = false}
+anagram-bonsol-channel-interface = { path = "../../../bonsol/onchain/channel-interface" , features = ["anchor"], default-features = false}

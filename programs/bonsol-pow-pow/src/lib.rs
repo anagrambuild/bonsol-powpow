@@ -1,40 +1,128 @@
+use anagram_bonsol_channel_interface::anchor::{Bonsol, ExecutionRequestV1Account, DeployV1Account};
+use anagram_bonsol_channel_interface::instructions::{
+    execute_v1,
+    ExecutionConfig,
+    
+    Input,
+    CallbackConfig
+};
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    token_interface::{
-        Mint, TokenAccount, TokenInterface
-    }
-};
-use anchor_spl::token_2022::spl_token_2022::{
-    extension::ExtensionType
-};
+use anchor_lang::solana_program::sysvar;
 use anchor_lang::solana_program::sysvar::Sysvar;
-use anagram_bonsol_channel_interface::{
-    anchor::DeployV1Account,
-    anchor::ExecutionRequestV1Account,
-    execute,
-    // anchor::{
-    //     BonsolChannel,
-    //     DeploymentAccountV1, 
-    //     ExecutionRequestV1,
-    // },
+use anchor_spl::token_interface::{token_metadata_initialize, TokenMetadataInitialize};
+use anchor_spl::{
+    token_2022::{
+        spl_token_2022::{self},
+        Token2022,
+    },
+    token_interface::{Mint, TokenAccount},
 };
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MINE_IMAGE_ID: &str = "ec8b92b02509d174a1a07dbe228d40ea13ff4b4b71b84bdc690064dfea2b6f86";
 
+#[error_code]
+pub enum MyError {
+    #[msg("Mine Request failed")]
+    MineRequestFailed,
+}
+#[program]
+pub mod bonsol_pow_pow {
+    
+    use anchor_lang::solana_program::keccak;
+
+    use super::*;
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        args: InitializeArgs,
+    ) -> Result<()> {
+        let cpi_accounts = TokenMetadataInitialize {
+            token_program_id: ctx.accounts.token_program.to_account_info(),
+            mint: ctx.accounts.mint.to_account_info(),
+            metadata: ctx.accounts.mint.to_account_info(),
+            mint_authority: ctx.accounts.pow_config.to_account_info(),
+            update_authority: ctx.accounts.pow_config.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        token_metadata_initialize(cpi_ctx, args.name, args.symbol, args.uri)?;
+        ctx.accounts.pow_config.mint = ctx.accounts.mint.key();
+        ctx.accounts.pow_config.init_slot = sysvar::clock::Clock::get()?.slot;
+        Ok(())
+    }
+
+    pub fn mine_token(ctx: Context<MineToken>, args: MineTokenArgs) -> Result<()> {
+        let slot =sysvar::clock::Clock::get()?.slot;
+        let pkbytes = ctx.accounts.pow_config.mint.to_bytes();
+        let input_hash = keccak::hashv(&[
+            &args.num,
+            &pkbytes,
+        ]);
+        execute_v1(
+            ctx.accounts.miner.key,
+            MINE_IMAGE_ID,
+            &args.current_req_id,
+            vec![ 
+                Input::public(pkbytes.to_vec()),
+                Input::public(args.num.to_vec()),
+            ],
+            args.tip,
+            slot + 100,
+            ExecutionConfig {
+                verify_input_hash: true,
+                input_hash: Some(input_hash.to_bytes().to_vec()),
+                forward_output: true,
+            },
+            Some(CallbackConfig {
+                program_id: crate::id(),
+                instruction_prefix: vec![0],
+                extra_accounts: vec![
+                    AccountMeta::new_readonly(ctx.accounts.pow_config.key(), false),
+                    AccountMeta::new(ctx.accounts.pow_mint_log.key(), false),
+                    AccountMeta::new(ctx.accounts.mint.key(), false),
+                    AccountMeta::new(ctx.accounts.token_account.key(), false),
+                    AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
+                ],
+            })
+        )
+        .map_err(|_| MyError::MineRequestFailed)?;
+        Ok(())
+    }
+
+    pub fn bonsol_callback(ctx: Context<BonsolCallback>) -> Result<()> {
+        let slot = sysvar::clock::Clock::get()?.slot;
+        Ok(())
+    }
+
+
+}
 
 #[account]
 #[derive(InitSpace)]
 pub struct PoWConfig {
-    pub pow_authority: Pubkey, // will be set to system program
     pub mint: Pubkey,
     pub init_slot: u64,
+    pub last_mined: u64,
 }
+
+#[account]
+#[derive(InitSpace)]
+pub struct PowMintLog {
+    pub miner: Pubkey,
+    pub slot: u64,
+}
+
 #[derive(AnchorDeserialize, AnchorSerialize)]
 pub struct InitializeArgs {
     pub name: String,
     pub symbol: String,
     pub uri: String,
+}
+
+#[derive(AnchorDeserialize, AnchorSerialize)]
+pub struct MineTokenArgs {
+    pub current_req_id: String,
+    pub num: [u8; 64],
+    pub tip: u64,
 }
 
 #[derive(Accounts)]
@@ -51,7 +139,6 @@ pub struct Initialize<'info> {
     #[account(
         init,
         payer = payer,
-        signer,
         seeds = [b"mint"],
         bump,
         mint::token_program = token_program,
@@ -61,149 +148,54 @@ pub struct Initialize<'info> {
         extensions::metadata_pointer::authority = authority,
         extensions::metadata_pointer::metadata_address = mint,
     )]
-    /// CHECK will become the mint
     pub mint: InterfaceAccount<'info, Mint>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
-    pub token_program: Interface<'info, TokenInterface>,
+    pub token_program: Program<'info, Token2022>,
     pub authority: Signer<'info>,
 }
 
-#[derive(Accounts)]
+#[derive(Accounts)] 
+#[instruction(args: MineTokenArgs)]
 pub struct MineToken<'info> {
     #[account(
         seeds = [b"powconfig"],
         bump
     )]
     pub pow_config: Account<'info, PoWConfig>,
-    
-    #[account(mut,
-    )]
-    pub mint:  InterfaceAccount<'info, Mint>,
-    #[account(mut)]
-    pub token_account: InterfaceAccount<'info, TokenAccount>,
-    pub token_program: Interface<'info, TokenInterface>,
     #[account(
-
+        init_if_needed,
+        space = 8 + PowMintLog::INIT_SPACE,
+        payer = miner,
+        seeds = [b"powmintlog", miner.key().as_ref()],
+        bump,
     )]
-    pub deployment_account:  InterfaceAccount<'info, DeployV1Account<'info>>,
+    pub pow_mint_log: Account<'info, PowMintLog>,
+    #[account(mut)]
+    pub miner: Signer<'info>,
+    #[account(mut,
+        constraint = mint.key() == pow_config.mint,
+    )]
+    pub mint: InterfaceAccount<'info, Mint>,
+    #[account(
+        mut,
+        owner = token_program.key(),
+        associated_token::mint = mint,
+        associated_token::authority = miner,
+        associated_token::token_program = token_program,
+    )]
+    pub token_account: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Program<'info, Token2022>,
+    pub bonsol_program: Program<'info, Bonsol>,
+    pub execution_request: Account<'info, ExecutionRequestV1Account<'info>>,
+    pub deployment_account: Account<'info, DeployV1Account<'info>>,
+    pub system_program: Program<'info, System>,
 }
 
-
-#[program]
-pub mod bonsol_pow_pow {
-    use anchor_lang::accounts::sysvar;
-
-    use super::*;
-
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        name: String,
-        symbol: String,
-        uri: String,
-    ) -> Result<()> {
-        // Initialize the mint
-        let mint_address = ctx.accounts.mint.key();
-        let mint_authority = ctx.accounts.pow_authority.key();
-        let decimals = 9;
-
-        
-
-        let initialize_mint_ix = initialize_mint2(
-            &spl_token_2022::id(),
-            &mint_address,
-            &mint_authority,
-            Some(&mint_authority), // freeze_authority
-            decimals,
-        )?;
-
-        anchor_lang::solana_program::program::invoke(
-            &initialize_mint_ix,
-            &[
-                ctx.accounts.mint.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-            ],
-        )?;
-
-        // Initialize metadata
-        let metadata = Metadata {
-            name,
-            symbol,
-            uri,
-            update_authority: Some(ctx.accounts.pow_authority.key()),
-            mint: ctx.accounts.mint.key(),
-            ..Default::default()
-        };
-
-        let metadata_bytes = metadata.try_to_vec()?;
-        initialize_metadata(ctx.accounts.mint.to_account_info(), metadata_bytes)?;
-        ctx.accounts.pow_config.mint = ctx.accounts.mint.key();
-        ctx.accounts.pow_config.pow_authority = ctx.accounts.pow_authority.key();
-        ctx.accounts.pow_config.init_slot = sysvar::clock::Clock::get()?.slot;
-        Ok(())
-    }
-   
-
-
+#[derive(Accounts)]
+pub struct BonsolCallback<'info> {
+    #[account(mut)]
+    pub mint: InterfaceAccount<'info, Mint>,
     
 }
-
-// #[derive(Accounts)]
-// pub struct MineToken<'info> {
-//     #[account(
-//         seeds = [b"powconfig"],
-//         bump
-        
-//     )]
-
-    
-// }
-
-// #[derive(Accounts)]
-// pub struct BonsolCallback<'info> {
-//     #[account(mut)]
-//     pub mint: Account<'info, Mint>,
-//     #[account(mut)]
-//     pub token_account: Account<'info, TokenAccount>,
-//     pub token_program: Interface<'info, TokenInterface>,
-//     #[account(
-//         seeds = [b"powauthority"],
-//         bump
-//     )]
-//     /// CHECK: This is a PDA, safe to use as mint authority
-//     pub pow_authority: UncheckedAccount<'info>,
-// }
-
-// #[derive(Account)]
-
-
-// fn initialize_metadata(
-//     mint_account_info: AccountInfo,
-//     metadata: Vec<u8>,
-// ) -> Result<()> {
-//     let mut metadata_account = mint_account_info.try_borrow_mut_data()?;
-//     let metadata_account = BaseMetadataAccountExt::init_metadata(metadata_account.as_ref_mut(), &metadata)?;
-    
-//     Ok(())
-// }
-// fn mint_token(
-//     mint_account_info: AccountInfo,
-//     token_account_info: AccountInfo,
-//     amount: u64,
-// ) -> Result<()> {
-//     let mint_account = Mint::unpack(&mint_account_info.data.borrow())?;
-//     let token_account = TokenAccount::unpack(&token_account_info.data.borrow())?;
-//     let cpi_accounts = MintTo {
-//         mint: mint_account_info.clone(),
-//         to: token_account_info.clone(),
-//         authority: mint_account_info.clone(),
-//     };
-
-//     let cpi_program = token_program_info.clone();
-//     let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, &[]);
-
-//     token::mint_to(cpi_ctx, amount)?;
-
-//     Ok(())
-// }
