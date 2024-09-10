@@ -1,20 +1,15 @@
-use anagram_bonsol_channel_interface::anchor::{Bonsol, ExecutionRequestV1Account, DeployV1Account};
+use anagram_bonsol_channel_interface::anchor::{
+    Bonsol, DeployV1Account, ExecutionRequestV1Account,
+};
 use anagram_bonsol_channel_interface::instructions::{
-    execute_v1,
-    ExecutionConfig,
-    
-    Input,
-    CallbackConfig
+    execute_v1, CallbackConfig, ExecutionConfig, Input,
 };
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar;
 use anchor_lang::solana_program::sysvar::Sysvar;
 use anchor_spl::token_interface::{token_metadata_initialize, TokenMetadataInitialize};
 use anchor_spl::{
-    token_2022::{
-        spl_token_2022::{self},
-        Token2022,
-    },
+    token_2022::Token2022,
     token_interface::{Mint, TokenAccount},
 };
 
@@ -22,20 +17,25 @@ declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MINE_IMAGE_ID: &str = "ec8b92b02509d174a1a07dbe228d40ea13ff4b4b71b84bdc690064dfea2b6f86";
 
 #[error_code]
-pub enum MyError {
+pub enum PowError {
     #[msg("Mine Request failed")]
     MineRequestFailed,
+    #[msg("Mine Too Fast")]
+    MineTooFast,
+    #[msg("Invalid Callback")]
+    InvalidCallback,
+    #[msg("Invalid Output")]
+    InvalidOutput,
 }
 #[program]
 pub mod bonsol_pow_pow {
-    
+
+    use anagram_bonsol_channel_interface::callback::handle_callback;
     use anchor_lang::solana_program::keccak;
+    use anchor_spl::token_2022::{mint_to, MintTo};
 
     use super::*;
-    pub fn initialize(
-        ctx: Context<Initialize>,
-        args: InitializeArgs,
-    ) -> Result<()> {
+    pub fn initialize(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
         let cpi_accounts = TokenMetadataInitialize {
             token_program_id: ctx.accounts.token_program.to_account_info(),
             mint: ctx.accounts.mint.to_account_info(),
@@ -51,17 +51,22 @@ pub mod bonsol_pow_pow {
     }
 
     pub fn mine_token(ctx: Context<MineToken>, args: MineTokenArgs) -> Result<()> {
-        let slot =sysvar::clock::Clock::get()?.slot;
+        let slot = sysvar::clock::Clock::get()?.slot;
         let pkbytes = ctx.accounts.pow_config.mint.to_bytes();
-        let input_hash = keccak::hashv(&[
-            &args.num,
-            &pkbytes,
-        ]);
+        let input_hash = keccak::hashv(&[&args.num, &pkbytes]);
+        if slot - ctx.accounts.pow_mint_log.slot < 100 {
+            return Err(PowError::MineTooFast.into());
+        }
+        if slot - ctx.accounts.pow_config.last_mined < 2 {
+            return Err(PowError::MineTooFast.into());
+        }
+        ctx.accounts.pow_mint_log.current_execution_account =
+            Some(ctx.accounts.execution_request.key());
         execute_v1(
             ctx.accounts.miner.key,
             MINE_IMAGE_ID,
             &args.current_req_id,
-            vec![ 
+            vec![
                 Input::public(pkbytes.to_vec()),
                 Input::public(args.num.to_vec()),
             ],
@@ -82,18 +87,46 @@ pub mod bonsol_pow_pow {
                     AccountMeta::new(ctx.accounts.token_account.key(), false),
                     AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
                 ],
-            })
+            }),
         )
-        .map_err(|_| MyError::MineRequestFailed)?;
+        .map_err(|_| PowError::MineRequestFailed)?;
         Ok(())
     }
 
-    pub fn bonsol_callback(ctx: Context<BonsolCallback>) -> Result<()> {
+    pub fn bonsol_callback(ctx: Context<BonsolCallback>, data: Vec<u8>) -> Result<()> {
         let slot = sysvar::clock::Clock::get()?.slot;
-        Ok(())
+        if let Some(epub) = ctx.accounts.pow_mint_log.current_execution_account {
+            if ctx.accounts.execution_request.key() != epub {
+                return Err(PowError::InvalidCallback.into());
+            }
+            let ainfos = ctx.accounts.to_account_infos();
+            let output = handle_callback(epub, &ainfos.as_slice(), &data)?;
+            // this is application specific
+            let (_, difficulty) = output.split_at(32);
+            let difficulty =
+                u64::from_le_bytes(difficulty.try_into().map_err(|_| PowError::InvalidOutput)?);
+            //mint tokens to token account based on difficulty
+            ctx.accounts.pow_mint_log.slot = slot;
+            ctx.accounts.pow_mint_log.amount_mined += difficulty;
+            ctx.accounts.pow_mint_log.current_execution_account = None;
+            // mint tokens
+
+            mint_to(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    MintTo {
+                        mint: ctx.accounts.mint.to_account_info(),
+                        to: ctx.accounts.token_account.to_account_info(),
+                        authority: ctx.accounts.pow_config.to_account_info(),
+                    },
+                ),
+                difficulty,
+            )?;
+            Ok(())
+        } else {
+            Err(PowError::InvalidCallback.into())
+        }
     }
-
-
 }
 
 #[account]
@@ -102,13 +135,16 @@ pub struct PoWConfig {
     pub mint: Pubkey,
     pub init_slot: u64,
     pub last_mined: u64,
+    pub total_mined: u64,
 }
 
 #[account]
 #[derive(InitSpace)]
 pub struct PowMintLog {
     pub miner: Pubkey,
+    pub amount_mined: u64,
     pub slot: u64,
+    pub current_execution_account: Option<Pubkey>,
 }
 
 #[derive(AnchorDeserialize, AnchorSerialize)]
@@ -156,7 +192,7 @@ pub struct Initialize<'info> {
     pub authority: Signer<'info>,
 }
 
-#[derive(Accounts)] 
+#[derive(Accounts)]
 #[instruction(args: MineTokenArgs)]
 pub struct MineToken<'info> {
     #[account(
@@ -172,7 +208,9 @@ pub struct MineToken<'info> {
         bump,
     )]
     pub pow_mint_log: Account<'info, PowMintLog>,
-    #[account(mut)]
+    #[account(mut,
+        constraint = pow_mint_log.miner == miner.key()
+    )]
     pub miner: Signer<'info>,
     #[account(mut,
         constraint = mint.key() == pow_config.mint,
@@ -195,7 +233,30 @@ pub struct MineToken<'info> {
 
 #[derive(Accounts)]
 pub struct BonsolCallback<'info> {
+    /// CHECK: This is the raw ER account, checked in the callback handler
+    pub execution_request: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        seeds = [b"powconfig"],
+        bump
+    )]
+    pub pow_config: Account<'info, PoWConfig>,
+    #[account(mut, seeds = [b"powmintlog"], bump)]
+    pub pow_mint_log: Account<'info, PowMintLog>,
+    #[account(mut,
+        constraint = pow_mint_log.miner == miner.key()
+    )]
+    /// CHECK: Checked via constraint
+    pub miner: UncheckedAccount<'info>,
     #[account(mut)]
     pub mint: InterfaceAccount<'info, Mint>,
-    
+    #[account(
+        mut,
+        owner = token_program.key(),
+        associated_token::mint = mint,
+        associated_token::authority = miner,
+        associated_token::token_program = token_program,
+    )]
+    pub token_account: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Program<'info, Token2022>,
 }
