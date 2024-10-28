@@ -18,6 +18,9 @@ fn main() {
 fn calculate_sequence(num: &[u8]) -> (Vec<BigUint>, BigUint, BigUint) {
     //sequence, sum, max
     let bignum = BigUint::from_bytes_le(num);
+    if bignum == BigUint::from(0u32) {
+        env::exit(1)
+    }
     let mut current = bignum.clone();
     let mut sum = BigUint::from(0u32);
     let mut max = current.clone();

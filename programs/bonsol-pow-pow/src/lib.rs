@@ -1,9 +1,3 @@
-use anagram_bonsol_channel_interface::anchor::{
-    Bonsol, DeployV1Account, ExecutionRequestV1Account,
-};
-use anagram_bonsol_channel_interface::instructions::{
-    execute_v1, CallbackConfig, ExecutionConfig, Input,
-};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar;
 use anchor_lang::solana_program::sysvar::Sysvar;
@@ -12,6 +6,12 @@ use anchor_spl::{
     token_2022::Token2022,
     token_interface::{Mint, TokenAccount},
 };
+use bonsol_interface::anchor::{Bonsol, DeployV1Account, ExecutionRequestV1Account};
+use bonsol_interface::instructions::{execute_v1, CallbackConfig, ExecutionConfig};
+
+use anchor_lang::solana_program::keccak;
+use anchor_spl::token_2022::{mint_to, MintTo};
+use bonsol_interface::callback::handle_callback;
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 const MINE_IMAGE_ID: &str = "ec8b92b02509d174a1a07dbe228d40ea13ff4b4b71b84bdc690064dfea2b6f86";
@@ -30,9 +30,7 @@ pub enum PowError {
 #[program]
 pub mod bonsol_pow_pow {
 
-    use anagram_bonsol_channel_interface::callback::handle_callback;
-    use anchor_lang::solana_program::keccak;
-    use anchor_spl::token_2022::{mint_to, MintTo};
+    use bonsol_interface::instructions::InputRef;
 
     use super::*;
     pub fn initialize(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
@@ -66,15 +64,12 @@ pub mod bonsol_pow_pow {
             ctx.accounts.miner.key,
             MINE_IMAGE_ID,
             &args.current_req_id,
-            vec![
-                Input::public(pkbytes.to_vec()),
-                Input::public(args.num.to_vec()),
-            ],
+            vec![InputRef::url(&pkbytes), InputRef::public(&args.num)],
             args.tip,
             slot + 100,
             ExecutionConfig {
                 verify_input_hash: true,
-                input_hash: Some(input_hash.to_bytes().to_vec()),
+                input_hash: Some(&input_hash.to_bytes()),
                 forward_output: true,
             },
             Some(CallbackConfig {
@@ -100,11 +95,15 @@ pub mod bonsol_pow_pow {
                 return Err(PowError::InvalidCallback.into());
             }
             let ainfos = ctx.accounts.to_account_infos();
-            let output = handle_callback(epub, &ainfos.as_slice(), &data)?;
+            let output = handle_callback(MINE_IMAGE_ID, &epub, &ainfos.as_slice(), &data)?;
             // this is application specific
-            let (_, difficulty) = output.split_at(32);
-            let difficulty =
-                u64::from_le_bytes(difficulty.try_into().map_err(|_| PowError::InvalidOutput)?);
+
+            let difficulty = u64::from_le_bytes(
+                output
+                    .committed_outputs
+                    .try_into()
+                    .map_err(|_| PowError::InvalidOutput)?,
+            );
             //mint tokens to token account based on difficulty
             ctx.accounts.pow_mint_log.slot = slot;
             ctx.accounts.pow_mint_log.amount_mined += difficulty;
