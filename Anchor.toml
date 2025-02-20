@@ -11,6 +11,7 @@ bonsol_pow_pow= "6C9bFAAkLwHNLCCgaZUQxEsYFPEJPeRUyavhaBe6zXNN"
 
 [provider]
 cluster = "Localnet"
+#test do not use anywhere
 wallet = "testkp.json"
 
 [scripts]

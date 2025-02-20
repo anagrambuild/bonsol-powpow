@@ -1,0 +1,5 @@
+[workspace]
+members = [
+  "programs/bonsol-pow-pow"
+]
+resolver="2"
