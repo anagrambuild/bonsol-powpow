@@ -1,11 +1,11 @@
 {
-  "name": "simple",
-  "binaryPath": "images/simple/target/riscv-guest/riscv32im-risc0-zkvm-elf/docker/simple/simple",
-  "imageId": "20b9db715f989e3f57842787badafae101ce0b16202491bac1a3aebf573da0ba",
+  "name": "collatz",
+  "binaryPath": "zkprograms/collatz/target/riscv-guest/riscv32im-risc0-zkvm-elf/docker/collatz/collatz",
+  "imageId": "586da1da087f9a25a8c372dee4d0e8a122265cf562264a6383535509dc8966e0",
   "inputOrder": [
-    "Public",
-    "Public"
+    "Private",
+    "Private"
   ],
-  "signature": "2snRJTZvUTXTYqMBaDAFsjtWXfAbRN3Boiwi7bNMizB1iifKdfJ4PSTHjBqgVrbt3V1YzUwc9MhXqorMUV6GDjS5",
-  "size": 266608
+  "signature": "{run build with a keypair to get this signature}",
+  "size": 118228
 }

@@ -6,15 +6,15 @@ use anchor_spl::{
     token_2022::Token2022,
     token_interface::{Mint, TokenAccount},
 };
-use bonsol_interface::anchor::{Bonsol, DeployV1Account, ExecutionRequestV1Account};
-use bonsol_interface::instructions::{execute_v1, CallbackConfig, ExecutionConfig};
+use bonsol_anchor_interface::{Bonsol, DeployV1Account, ExecutionRequestV1Account};
+use bonsol_anchor_interface::instructions::{execute_v1, CallbackConfig, ExecutionConfig, execute_v1_with_accounts, InputRef};
 
 use anchor_lang::solana_program::keccak;
 use anchor_spl::token_2022::{mint_to, MintTo};
-use bonsol_interface::callback::handle_callback;
+use bonsol_anchor_interface::callback::handle_callback;
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
-const MINE_IMAGE_ID: &str = "ec8b92b02509d174a1a07dbe228d40ea13ff4b4b71b84bdc690064dfea2b6f86";
+const MINE_IMAGE_ID: &str = "586da1da087f9a25a8c372dee4d0e8a122265cf562264a6383535509dc8966e0";
 
 #[error_code]
 pub enum PowError {
@@ -26,16 +26,15 @@ pub enum PowError {
     InvalidCallback,
     #[msg("Invalid Output")]
     InvalidOutput,
+    #[msg("Callback Error")]
+    CallbackError,
 }
 #[program]
 pub mod bonsol_pow_pow {
-
-    use bonsol_interface::instructions::InputRef;
-
     use super::*;
     pub fn initialize(ctx: Context<Initialize>, args: InitializeArgs) -> Result<()> {
         let cpi_accounts = TokenMetadataInitialize {
-            token_program_id: ctx.accounts.token_program.to_account_info(),
+            program_id: ctx.accounts.token_program.to_account_info(),
             mint: ctx.accounts.mint.to_account_info(),
             metadata: ctx.accounts.mint.to_account_info(),
             mint_authority: ctx.accounts.pow_config.to_account_info(),
@@ -60,13 +59,17 @@ pub mod bonsol_pow_pow {
         }
         ctx.accounts.pow_mint_log.current_execution_account =
             Some(ctx.accounts.execution_request.key());
-        execute_v1(
+
+        execute_v1_with_accounts(
             ctx.accounts.miner.key,
+            ctx.accounts.miner.key,
+            &ctx.accounts.execution_request.key(),
+            &ctx.accounts.deployment_account.key(),
             MINE_IMAGE_ID,
             &args.current_req_id,
             vec![InputRef::url(&pkbytes), InputRef::public(&args.num)],
             args.tip,
-            slot + 100,
+            slot + 500,
             ExecutionConfig {
                 verify_input_hash: true,
                 input_hash: Some(&input_hash.to_bytes()),
@@ -83,6 +86,7 @@ pub mod bonsol_pow_pow {
                     AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
                 ],
             }),
+            None
         )
         .map_err(|_| PowError::MineRequestFailed)?;
         Ok(())
@@ -95,7 +99,10 @@ pub mod bonsol_pow_pow {
                 return Err(PowError::InvalidCallback.into());
             }
             let ainfos = ctx.accounts.to_account_infos();
-            let output = handle_callback(MINE_IMAGE_ID, &epub, &ainfos.as_slice(), &data)?;
+            let output = handle_callback(MINE_IMAGE_ID, &epub, &ainfos.as_slice(), &data)
+            .map_err(|_|
+                PowError::CallbackError
+            )?;
             // this is application specific
 
             let difficulty = u64::from_le_bytes(
@@ -227,6 +234,9 @@ pub struct MineToken<'info> {
     pub bonsol_program: Program<'info, Bonsol>,
     pub execution_request: Account<'info, ExecutionRequestV1Account<'info>>,
     pub deployment_account: Account<'info, DeployV1Account<'info>>,
+    /// CHECK: This is the current program address
+    #[account(address = crate::id())]
+    pub mine_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 

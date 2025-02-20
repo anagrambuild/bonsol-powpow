@@ -9,8 +9,14 @@ describe("bonsol-pow-example", () => {
   const program = anchor.workspace.BonsolPowExample as Program<BonsolPowExample>;
 
   it("Is initialized!", async () => {
-    // Add your test here.
-    const tx = await program.methods.initialize().rpc();
+    
+    const tx = await program.rpc.initialize({
+      accounts: {
+        authority: program.provider.wallet.publicKey,
+      },
+    });
+
     console.log("Your transaction signature", tx);
+    
   });
 });
