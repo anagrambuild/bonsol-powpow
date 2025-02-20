@@ -1,26 +1,27 @@
-import * as anchor from '@project-serum/anchor';
-import { Program } from '@project-serum/anchor';
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
 import { assert } from 'chai';
 import { BonsolPowPow } from '../target/types/bonsol_pow_pow';
+import { expect, test, describe } from "bun:test";
 
-describe('initialize', () => {
-  // Configure the client to use the local cluster.
+
+test('Initializes the program', async () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
-
-  const program = anchor.workspace.MyProgram as Program<BonsolPowPow>;
-
-  it('Initializes the program', async () => {
-    // Define the arguments for the initialize method
-    const arg1 = new anchor.BN(1234); // Example argument
-    const arg2 = provider.wallet.publicKey; // Example argument
-
-    // Add your test here.
-    const tx = await program.methods.initialize(arg1, arg2).rpc();
-    console.log("Your transaction signature", tx);
-
-    // Fetch the account to check if it was initialized correctly
-    const account = await program.account.myAccount.fetch(provider.wallet.publicKey);
-    assert.ok(account.initialized);
-  });
+  const program = anchor.workspace.BonsolPowPow as Program<BonsolPowPow>;
+  // Add your test here.
+  const tx = await program.methods
+    .initialize({
+      name: "initialize",
+      symbol: "INIT",
+      uri: "https://arweave.net/1234",
+    })
+    .accounts({
+      payer: provider.wallet.publicKey,
+    })
+    .rpc();
+  console.log("Your transaction signature", tx);
+  // Fetch the account to check if it was initialized correctly
+  const account = await program.account.poWConfig.fetch(provider.wallet.publicKey);
+  assert.ok(account.mint);
 });

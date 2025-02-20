@@ -3,3 +3,6 @@ members = [
   "programs/bonsol-pow-pow"
 ]
 resolver="2"
+
+[profile.release]
+overflow-checks = true

@@ -233,8 +233,8 @@ pub struct MineToken<'info> {
     pub token_account: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Program<'info, Token2022>,
     pub bonsol_program: Program<'info, Bonsol>,
-    pub execution_request: Account<'info, ExecutionRequestV1Account<'info>>,
-    pub deployment_account: Account<'info, DeployV1Account<'info>>,
+    pub execution_request: Account<'info, ExecutionRequestV1Account::<'info>>,
+    pub deployment_account: Account<'info, DeployV1Account::<'info>>,
     /// CHECK: This is the current program address
     #[account(address = crate::id())]
     pub mine_program: UncheckedAccount<'info>,
