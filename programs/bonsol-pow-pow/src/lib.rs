@@ -13,7 +13,8 @@ use anchor_lang::solana_program::keccak;
 use anchor_spl::token_2022::{mint_to, MintTo};
 use bonsol_anchor_interface::callback::handle_callback;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+//change this id and make your own if you want to deploy to devnet
+declare_id!("6C9bFAAkLwHNLCCgaZUQxEsYFPEJPeRUyavhaBe6zXNN");
 const MINE_IMAGE_ID: &str = "586da1da087f9a25a8c372dee4d0e8a122265cf562264a6383535509dc8966e0";
 
 #[error_code]
